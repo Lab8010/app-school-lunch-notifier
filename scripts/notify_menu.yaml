@@ -1,0 +1,37 @@
+name: Send Today's School Lunch (LINE only)
+on:
+  schedule: [ { cron: '20 22 * * *' } ]   # JST 07:20 = UTC 22:20
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests PyYAML
+      - name: Send
+        env:
+          MENU_URL: https://raw.githubusercontent.com/Lab8010/app-school-lunch-notifier/main/menu/2025/202507.yaml
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_IDS: ${{ secrets.LINE_USER_IDS }}
+        run: |
+          python - <<'PY'
+          import os, requests, yaml, datetime
+          from zoneinfo import ZoneInfo
+          jst = ZoneInfo("Asia/Tokyo")
+          today = datetime.datetime.now(jst).date().isoformat()
+          data = yaml.safe_load(requests.get(os.environ["MENU_URL"], timeout=10).text)
+          m = {x["date"]: x["items"] for x in data["menus"]}
+          items = m.get(today)
+          if not items: 
+              print("no menu"); raise SystemExit(0)
+          text = f"【今日の給食】\n" + " / ".join(items)
+          headers = {"Authorization": f"Bearer {os.environ['LINE_CHANNEL_ACCESS_TOKEN']}",
+                     "Content-Type":"application/json"}
+          for uid in os.environ["LINE_USER_IDS"].split(","):
+              requests.post("https://api.line.me/v2/bot/message/push",
+                            headers=headers,
+                            json={"to": uid.strip(), "messages":[{"type":"text","text":text}]},
+                            timeout=10).raise_for_status()
+          PY
